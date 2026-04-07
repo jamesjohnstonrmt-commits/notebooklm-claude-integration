@@ -48,7 +48,7 @@
       margin-bottom: .35rem;
     }
 
-    select, input[type="number"] {
+    select, input[type="number"], input[type="text"], textarea {
       display: block;
       width: 100%;
       padding: .65rem .85rem;
@@ -63,6 +63,12 @@
       -webkit-appearance: none;
     }
 
+    textarea {
+      resize: vertical;
+      min-height: 140px;
+      font-family: inherit;
+    }
+
     select {
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23555' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
@@ -70,13 +76,13 @@
       padding-right: 2.5rem;
     }
 
-    select:focus, input[type="number"]:focus {
+    select:focus, input[type="number"]:focus, input[type="text"]:focus, textarea:focus {
       outline: none;
       border-color: #4f7cff;
       box-shadow: 0 0 0 3px rgba(79,124,255,.15);
     }
 
-    select:disabled {
+    select:disabled, textarea:disabled, input:disabled {
       background-color: #f5f5f5;
       color: #999;
       cursor: not-allowed;
@@ -116,6 +122,21 @@
       justify-content: flex-start;
     }
     .btn-download:hover { background: #d0eaf8; }
+
+    /* ── Toggle link ── */
+    .toggle-link {
+      display: inline-block;
+      font-size: .82rem;
+      color: #4f7cff;
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: -.75rem;
+      margin-bottom: 1.25rem;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .toggle-link:hover { color: #3a66e8; }
 
     /* ── Status section ── */
     #status-section {
@@ -207,6 +228,10 @@
       border-top: 1px solid #eee;
       margin: 1.5rem 0;
     }
+
+    /* ── Manual input section ── */
+    #manual-section { display: none; }
+    #manual-section.visible { display: block; }
   </style>
 </head>
 <body>
@@ -216,13 +241,26 @@
 
     <!-- Notebook selector -->
     <label for="notebook-select">Notebook</label>
-    <div id="notebook-notice" class="notice">
-      NotebookLM is unavailable or no notebooks were found. Check that the SDK
-      is installed and your credentials are set in <code>.env</code>.
-    </div>
+    <div id="notebook-notice" class="notice"></div>
     <select id="notebook-select" disabled>
       <option value="">Loading notebooks…</option>
     </select>
+    <button type="button" class="toggle-link" id="toggle-manual" style="display:none">
+      Enter content manually instead
+    </button>
+
+    <!-- Manual input (shown when notebooks unavailable or user opts in) -->
+    <div id="manual-section">
+      <label for="notebook-title-input">Notebook title</label>
+      <input type="text" id="notebook-title-input" placeholder="e.g. My Research Notes" />
+
+      <label for="notebook-text-input">Notebook content</label>
+      <textarea id="notebook-text-input" placeholder="Paste your notebook text here…"></textarea>
+
+      <button type="button" class="toggle-link" id="toggle-auto" style="display:none">
+        ← Back to notebook selector
+      </button>
+    </div>
 
     <!-- Slide count -->
     <label for="num-slides">Number of slides</label>
@@ -255,31 +293,67 @@
   </div>
 
   <script>
-    const notebookSelect = document.getElementById('notebook-select');
-    const numSlides      = document.getElementById('num-slides');
-    const generateBtn    = document.getElementById('generate-btn');
-    const btnLabel       = document.getElementById('btn-label');
-    const statusSection  = document.getElementById('status-section');
-    const spinner        = document.getElementById('spinner');
-    const statusIcon     = document.getElementById('status-icon');
-    const statusText     = document.getElementById('status-text');
-    const progressBar    = document.getElementById('progress-bar');
-    const progressWrap   = document.getElementById('progress-wrap');
-    const downloadsSection = document.getElementById('downloads-section');
-    const downloadList   = document.getElementById('download-list');
-    const notebookNotice = document.getElementById('notebook-notice');
+    const notebookSelect    = document.getElementById('notebook-select');
+    const numSlides         = document.getElementById('num-slides');
+    const generateBtn       = document.getElementById('generate-btn');
+    const btnLabel          = document.getElementById('btn-label');
+    const statusSection     = document.getElementById('status-section');
+    const spinner           = document.getElementById('spinner');
+    const statusIcon        = document.getElementById('status-icon');
+    const statusText        = document.getElementById('status-text');
+    const progressBar       = document.getElementById('progress-bar');
+    const progressWrap      = document.getElementById('progress-wrap');
+    const downloadsSection  = document.getElementById('downloads-section');
+    const downloadList      = document.getElementById('download-list');
+    const notebookNotice    = document.getElementById('notebook-notice');
+    const manualSection     = document.getElementById('manual-section');
+    const toggleManualBtn   = document.getElementById('toggle-manual');
+    const toggleAutoBtn     = document.getElementById('toggle-auto');
+    const notebookTitleInput = document.getElementById('notebook-title-input');
+    const notebookTextInput  = document.getElementById('notebook-text-input');
 
-    let pollTimer = null;
+    let pollTimer  = null;
+    let manualMode = false;   // true when the user is entering text manually
+
+    // ── Mode switching ────────────────────────────────────────────────────
+    function enterManualMode() {
+      manualMode = true;
+      manualSection.classList.add('visible');
+      notebookSelect.disabled = true;
+      toggleManualBtn.style.display = 'none';
+      toggleAutoBtn.style.display   = 'inline-block';
+      generateBtn.disabled = false;
+    }
+
+    function enterAutoMode() {
+      manualMode = false;
+      manualSection.classList.remove('visible');
+      toggleAutoBtn.style.display = 'none';
+      // Re-enable the selector only if it has real options
+      const hasOptions = notebookSelect.options.length > 0
+        && notebookSelect.options[0].value !== '';
+      notebookSelect.disabled  = !hasOptions;
+      toggleManualBtn.style.display = 'inline-block';
+      generateBtn.disabled = !hasOptions;
+    }
+
+    toggleManualBtn.addEventListener('click', enterManualMode);
+    toggleAutoBtn.addEventListener('click', enterAutoMode);
 
     // ── Load notebooks on page ready ──────────────────────────────────────
     async function loadNotebooks() {
+      notebookSelect.innerHTML = '<option value="">Loading notebooks…</option>';
+      notebookSelect.disabled = true;
+      generateBtn.disabled = true;
+
       try {
-        const res = await fetch('/api/notebooks');
+        const res  = await fetch('/api/notebooks');
         const data = await res.json();
 
         notebookSelect.innerHTML = '';
 
         if (data.warning) {
+          notebookNotice.textContent = data.warning;
           notebookNotice.classList.add('visible');
         }
 
@@ -290,6 +364,9 @@
           notebookSelect.appendChild(opt);
           notebookSelect.disabled = true;
           generateBtn.disabled = true;
+          // Automatically show manual input as fallback
+          toggleManualBtn.style.display = 'inline-block';
+          enterManualMode();
           return;
         }
 
@@ -301,19 +378,38 @@
         });
 
         notebookSelect.disabled = false;
-        generateBtn.disabled = false;
+        generateBtn.disabled    = false;
+        toggleManualBtn.style.display = 'inline-block';
       } catch (err) {
         notebookSelect.innerHTML = '<option value="">Error loading notebooks</option>';
-        showError('Could not fetch notebooks: ' + err.message);
+        notebookNotice.textContent = 'Could not fetch notebooks: ' + err.message;
+        notebookNotice.classList.add('visible');
+        toggleManualBtn.style.display = 'inline-block';
+        enterManualMode();
       }
     }
 
     // ── Generate ──────────────────────────────────────────────────────────
     generateBtn.addEventListener('click', async () => {
-      const notebookId = notebookSelect.value;
-      if (!notebookId) return;
-
       const slides = parseInt(numSlides.value, 10) || 8;
+      let body;
+
+      if (manualMode) {
+        const text = notebookTextInput.value.trim();
+        if (!text) {
+          showError('Please enter notebook content before generating.');
+          return;
+        }
+        body = {
+          notebook_text:  text,
+          notebook_title: notebookTitleInput.value.trim() || 'Untitled Notebook',
+          num_slides:     slides,
+        };
+      } else {
+        const notebookId = notebookSelect.value;
+        if (!notebookId) return;
+        body = { notebook_id: notebookId, num_slides: slides };
+      }
 
       // Reset UI
       downloadsSection.style.display = 'none';
@@ -323,10 +419,10 @@
       btnLabel.textContent = 'Generating…';
 
       try {
-        const res = await fetch('/api/generate', {
-          method: 'POST',
+        const res  = await fetch('/api/generate', {
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notebook_id: notebookId, num_slides: slides }),
+          body:    JSON.stringify(body),
         });
         const data = await res.json();
 
@@ -345,8 +441,6 @@
     function pollStatus(jobId) {
       if (pollTimer) clearInterval(pollTimer);
 
-      // Animate progress bar to show activity
-      let pct = 5;
       const progressSteps = [5, 15, 30, 50, 70, 85, 92, 96];
       let stepIdx = 0;
 
@@ -357,7 +451,6 @@
 
           setStatus(job.status, job.progress || '');
 
-          // Advance fake progress bar
           if (job.status === 'running') {
             if (stepIdx < progressSteps.length) {
               progressBar.style.width = progressSteps[stepIdx++] + '%';
@@ -392,18 +485,18 @@
       statusText.textContent = message;
 
       if (status === 'running' || status === 'queued') {
-        spinner.style.display = 'block';
+        spinner.style.display   = 'block';
         statusIcon.style.display = 'none';
         progressWrap.style.display = 'block';
       } else if (status === 'complete') {
-        spinner.style.display = 'none';
-        statusIcon.textContent = '✅';
+        spinner.style.display    = 'none';
+        statusIcon.textContent   = '✅';
         statusIcon.style.display = 'inline';
         statusSection.classList.add('is-success');
         progressWrap.style.display = 'none';
       } else if (status === 'error') {
-        spinner.style.display = 'none';
-        statusIcon.textContent = '❌';
+        spinner.style.display    = 'none';
+        statusIcon.textContent   = '❌';
         statusIcon.style.display = 'inline';
         statusSection.classList.add('is-error');
         progressWrap.style.display = 'none';
@@ -432,8 +525,8 @@
       files.forEach(f => {
         const btn = document.createElement('a');
         btn.className = 'btn btn-download';
-        btn.href = '/download/' + encodeURIComponent(f.filename);
-        btn.download = f.filename;
+        btn.href      = '/download/' + encodeURIComponent(f.filename);
+        btn.download  = f.filename;
         btn.textContent = f.label || f.filename;
         downloadList.appendChild(btn);
       });
@@ -444,3 +537,4 @@
   </script>
 </body>
 </html>
+

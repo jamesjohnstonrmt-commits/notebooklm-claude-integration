@@ -15,5 +15,10 @@ google-api-python-client>=2.0.0
 python-pptx>=0.6.21
 python-docx>=1.1.0
 
-# NotebookLM (unofficial community SDK)
+# NotebookLM (unofficial community SDK – used as fallback)
 notebooklm>=0.1.0
+
+# NotebookLM web scraper
+selenium>=4.0.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0

@@ -25,6 +25,7 @@ import config
 from claude_generator import ClaudeGenerator
 from drive_handler import DriveHandler
 from notebooklm_handler import NotebookLMHandler
+from notebooklm_scraper import NotebookLMScraper
 from presentation_builder import DOCX_MIME, PPTX_MIME, PresentationBuilder
 
 # ---------------------------------------------------------------------------
@@ -62,17 +63,44 @@ def index() -> str:
 
 @app.route("/api/notebooks")
 def api_notebooks():
-    """Return a JSON list of available NotebookLM notebooks."""
+    """Return a JSON list of available NotebookLM notebooks.
+
+    Tries the Selenium scraper first; if that is unavailable falls back to
+    the unofficial SDK handler.  Returns an empty list with a ``warning``
+    field when neither method works so the UI can offer manual input.
+    """
+    # ── Attempt 1: Selenium scraper ─────────────────────────────────────────
+    scraper = NotebookLMScraper(
+        email=config.NOTEBOOKLM_EMAIL,
+        password=config.NOTEBOOKLM_PASSWORD,
+    )
+    try:
+        if scraper.login():
+            notebooks = scraper.list_notebooks()
+            if notebooks:
+                return jsonify({"notebooks": notebooks, "source": "scraper"})
+    finally:
+        scraper.close()
+
+    # ── Attempt 2: unofficial SDK ────────────────────────────────────────────
     handler = NotebookLMHandler(
         email=config.NOTEBOOKLM_EMAIL,
         password=config.NOTEBOOKLM_PASSWORD,
     )
-    connected = handler.connect()
-    if not connected:
-        return jsonify({"notebooks": [], "warning": "NotebookLM not available – SDK not installed or authentication failed."})
+    if handler.connect():
+        notebooks = handler.list_notebooks()
+        if notebooks:
+            return jsonify({"notebooks": notebooks, "source": "sdk"})
 
-    notebooks = handler.list_notebooks()
-    return jsonify({"notebooks": notebooks})
+    return jsonify({
+        "notebooks": [],
+        "warning": (
+            "NotebookLM is unavailable – authentication failed or no notebooks "
+            "were found.  Check your credentials in .env and ensure Selenium / "
+            "Chrome is installed, then refresh.  You can also enter notebook "
+            "content manually below."
+        ),
+    })
 
 
 @app.route("/api/generate", methods=["POST"])
@@ -80,12 +108,13 @@ def api_generate():
     """
     Start a generation job in a background thread.
 
-    Expected JSON body::
+    Expected JSON body (one of two modes)::
 
-        {
-          "notebook_id": "...",   // required
-          "num_slides": 8         // optional, default 8
-        }
+        # Automatic mode – fetch content from NotebookLM
+        { "notebook_id": "...", "num_slides": 8 }
+
+        # Manual mode – content supplied directly by the user
+        { "notebook_text": "...", "notebook_title": "My Notes", "num_slides": 8 }
 
     Returns::
 
@@ -93,10 +122,12 @@ def api_generate():
     """
     data = request.get_json(force=True, silent=True) or {}
     notebook_id: str = data.get("notebook_id", "").strip()
+    notebook_text: str = data.get("notebook_text", "").strip()
+    notebook_title: str = data.get("notebook_title", "Untitled Notebook").strip()
     num_slides: int = int(data.get("num_slides", 8))
 
-    if not notebook_id:
-        return jsonify({"error": "notebook_id is required"}), 400
+    if not notebook_id and not notebook_text:
+        return jsonify({"error": "Either notebook_id or notebook_text is required"}), 400
 
     job_id = str(uuid.uuid4())
     with _jobs_lock:
@@ -109,7 +140,7 @@ def api_generate():
 
     thread = threading.Thread(
         target=_run_generation,
-        args=(job_id, notebook_id, num_slides),
+        args=(job_id, notebook_id, num_slides, notebook_text, notebook_title),
         daemon=True,
     )
     thread.start()
@@ -150,29 +181,69 @@ def _set_progress(job_id: str, status: str, progress: str) -> None:
             _jobs[job_id]["progress"] = progress
 
 
-def _run_generation(job_id: str, notebook_id: str, num_slides: int) -> None:
+def _run_generation(
+    job_id: str,
+    notebook_id: str,
+    num_slides: int,
+    notebook_text: str = "",
+    notebook_title: str = "Untitled Notebook",
+) -> None:
     """Full generation pipeline; updates _jobs[job_id] throughout."""
     try:
-        # ── Step 1: Fetch notebook content ──────────────────────────────────
+        # ── Step 1: Obtain notebook content ─────────────────────────────────
         _set_progress(job_id, "running", "Connecting to NotebookLM…")
 
-        handler = NotebookLMHandler(
-            email=config.NOTEBOOKLM_EMAIL,
-            password=config.NOTEBOOKLM_PASSWORD,
-        )
-        connected = handler.connect()
-
-        if connected:
-            _set_progress(job_id, "running", "Fetching notebook content…")
-            nb_data = handler.get_notebook_data(notebook_id)
-            if nb_data is None:
-                _fail(job_id, f"Could not retrieve notebook '{notebook_id}' from NotebookLM.")
-                return
+        if notebook_text:
+            # Manual-input mode: use the text supplied by the user directly.
+            nb_data = NotebookLMHandler.from_text(notebook_title, notebook_text)
             notebook_title = nb_data.title
-            notebook_text = nb_data.to_text()
+            notebook_text_out = nb_data.to_text()
         else:
-            _fail(job_id, "NotebookLM is not available. Please ensure the SDK is installed and your credentials are correct.")
-            return
+            # Automatic mode: try Selenium scraper first, then SDK fallback.
+            scraper = NotebookLMScraper(
+                email=config.NOTEBOOKLM_EMAIL,
+                password=config.NOTEBOOKLM_PASSWORD,
+            )
+            raw_content: dict[str, Any] | None = None
+            try:
+                if scraper.login():
+                    _set_progress(job_id, "running", "Fetching notebook content…")
+                    raw_content = scraper.get_notebook_content(notebook_id)
+            finally:
+                scraper.close()
+
+            if raw_content:
+                nb_data = NotebookLMHandler.from_text(
+                    raw_content.get("title", "Untitled"),
+                    raw_content.get("content", ""),
+                )
+            else:
+                # Fall back to SDK
+                handler = NotebookLMHandler(
+                    email=config.NOTEBOOKLM_EMAIL,
+                    password=config.NOTEBOOKLM_PASSWORD,
+                )
+                connected = handler.connect()
+                if connected:
+                    _set_progress(job_id, "running", "Fetching notebook content via SDK…")
+                    nb_data = handler.get_notebook_data(notebook_id)
+                    if nb_data is None:
+                        _fail(
+                            job_id,
+                            f"Could not retrieve notebook '{notebook_id}' from NotebookLM.",
+                        )
+                        return
+                else:
+                    _fail(
+                        job_id,
+                        "NotebookLM is not available. "
+                        "Please ensure Selenium/Chrome is installed and your "
+                        "credentials are correct, or switch to manual input.",
+                    )
+                    return
+
+            notebook_title = nb_data.title
+            notebook_text_out = nb_data.to_text()
 
         # ── Step 2: Generate content with Claude ────────────────────────────
         _set_progress(job_id, "running", f"Generating {num_slides} slides with Claude…")
@@ -182,7 +253,7 @@ def _run_generation(job_id: str, notebook_id: str, num_slides: int) -> None:
             model=config.CLAUDE_MODEL,
         )
         content = generator.generate_presentation(
-            notebook_text=notebook_text,
+            notebook_text=notebook_text_out,
             num_slides=num_slides,
         )
         logger.info("Claude generated '%s' (%d slides).", content.title, len(content.slides))
