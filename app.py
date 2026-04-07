@@ -197,7 +197,7 @@ def _run_generation(
             # Manual-input mode: use the text supplied by the user directly.
             nb_data = NotebookLMHandler.from_text(notebook_title, notebook_text)
             notebook_title = nb_data.title
-            notebook_text_out = nb_data.to_text()
+            notebook_text = nb_data.to_text()
         else:
             # Automatic mode: try Selenium scraper first, then SDK fallback.
             scraper = NotebookLMScraper(
@@ -243,7 +243,7 @@ def _run_generation(
                     return
 
             notebook_title = nb_data.title
-            notebook_text_out = nb_data.to_text()
+            notebook_text = nb_data.to_text()
 
         # ── Step 2: Generate content with Claude ────────────────────────────
         _set_progress(job_id, "running", f"Generating {num_slides} slides with Claude…")
@@ -253,7 +253,7 @@ def _run_generation(
             model=config.CLAUDE_MODEL,
         )
         content = generator.generate_presentation(
-            notebook_text=notebook_text_out,
+            notebook_text=notebook_text,
             num_slides=num_slides,
         )
         logger.info("Claude generated '%s' (%d slides).", content.title, len(content.slides))
