@@ -2,6 +2,9 @@
 anthropic>=0.25.0
 python-dotenv>=1.0.0
 
+# Web interface
+flask>=3.0.0
+
 # Google APIs
 google-auth>=2.0.0
 google-auth-oauthlib>=1.0.0

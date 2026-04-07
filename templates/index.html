@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NotebookLM → Presentation Generator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f5f7fa;
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.1);
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: .25rem;
+      color: #1a1a2e;
+    }
+
+    .subtitle {
+      font-size: .9rem;
+      color: #666;
+      margin-bottom: 2rem;
+    }
+
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: .35rem;
+    }
+
+    select, input[type="number"] {
+      display: block;
+      width: 100%;
+      padding: .65rem .85rem;
+      border: 1.5px solid #ddd;
+      border-radius: 8px;
+      font-size: 1rem;
+      color: #333;
+      background: #fff;
+      transition: border-color .2s;
+      margin-bottom: 1.25rem;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23555' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .85rem center;
+      padding-right: 2.5rem;
+    }
+
+    select:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: #4f7cff;
+      box-shadow: 0 0 0 3px rgba(79,124,255,.15);
+    }
+
+    select:disabled {
+      background-color: #f5f5f5;
+      color: #999;
+      cursor: not-allowed;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .5rem;
+      padding: .75rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, opacity .2s, transform .1s;
+    }
+
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+    .btn-primary {
+      background: #4f7cff;
+      color: #fff;
+      width: 100%;
+      margin-top: .5rem;
+    }
+    .btn-primary:hover:not(:disabled) { background: #3a66e8; }
+
+    .btn-download {
+      background: #e8f4fd;
+      color: #1a6faf;
+      border: 1.5px solid #b3d8f5;
+      width: 100%;
+      margin-bottom: .6rem;
+      justify-content: flex-start;
+    }
+    .btn-download:hover { background: #d0eaf8; }
+
+    /* ── Status section ── */
+    #status-section {
+      display: none;
+      margin-top: 1.75rem;
+      padding: 1.25rem 1.5rem;
+      border-radius: 8px;
+      background: #f0f4ff;
+      border: 1.5px solid #ccd8ff;
+    }
+
+    #status-section.is-error {
+      background: #fff0f0;
+      border-color: #ffc4c4;
+    }
+
+    #status-section.is-success {
+      background: #f0fff4;
+      border-color: #b0f0c4;
+    }
+
+    .status-header {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: .5rem;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid #ccd8ff;
+      border-top-color: #4f7cff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #status-icon { font-size: 1.25rem; line-height: 1; flex-shrink: 0; }
+    #status-text { font-size: .95rem; font-weight: 500; color: #333; }
+
+    /* ── Progress bar ── */
+    .progress-bar-wrap {
+      height: 6px;
+      background: #dde4ff;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: .75rem;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: #4f7cff;
+      border-radius: 3px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+
+    /* ── Downloads ── */
+    #downloads-section {
+      display: none;
+      margin-top: 1.5rem;
+    }
+
+    #downloads-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: .9rem;
+      color: #333;
+    }
+
+    /* ── Warning/info pill ── */
+    .notice {
+      font-size: .82rem;
+      color: #7a5c00;
+      background: #fff8e1;
+      border: 1px solid #ffd54f;
+      border-radius: 6px;
+      padding: .55rem .85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .notice.visible { display: block; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #eee;
+      margin: 1.5rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📓 Presentation Generator</h1>
+    <p class="subtitle">NotebookLM &rarr; Claude &rarr; PowerPoint &amp; Workbook</p>
+
+    <!-- Notebook selector -->
+    <label for="notebook-select">Notebook</label>
+    <div id="notebook-notice" class="notice">
+      NotebookLM is unavailable or no notebooks were found. Check that the SDK
+      is installed and your credentials are set in <code>.env</code>.
+    </div>
+    <select id="notebook-select" disabled>
+      <option value="">Loading notebooks…</option>
+    </select>
+
+    <!-- Slide count -->
+    <label for="num-slides">Number of slides</label>
+    <input type="number" id="num-slides" value="8" min="1" max="50" />
+
+    <!-- Generate button -->
+    <button class="btn btn-primary" id="generate-btn" disabled>
+      <span id="btn-label">Generate Presentation</span>
+    </button>
+
+    <hr class="divider" />
+
+    <!-- Status -->
+    <div id="status-section">
+      <div class="status-header">
+        <div class="spinner" id="spinner"></div>
+        <span id="status-icon" style="display:none"></span>
+        <span id="status-text">Starting…</span>
+      </div>
+      <div class="progress-bar-wrap" id="progress-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Downloads -->
+    <div id="downloads-section">
+      <h2>✅ Ready to download</h2>
+      <div id="download-list"></div>
+    </div>
+  </div>
+
+  <script>
+    const notebookSelect = document.getElementById('notebook-select');
+    const numSlides      = document.getElementById('num-slides');
+    const generateBtn    = document.getElementById('generate-btn');
+    const btnLabel       = document.getElementById('btn-label');
+    const statusSection  = document.getElementById('status-section');
+    const spinner        = document.getElementById('spinner');
+    const statusIcon     = document.getElementById('status-icon');
+    const statusText     = document.getElementById('status-text');
+    const progressBar    = document.getElementById('progress-bar');
+    const progressWrap   = document.getElementById('progress-wrap');
+    const downloadsSection = document.getElementById('downloads-section');
+    const downloadList   = document.getElementById('download-list');
+    const notebookNotice = document.getElementById('notebook-notice');
+
+    let pollTimer = null;
+
+    // ── Load notebooks on page ready ──────────────────────────────────────
+    async function loadNotebooks() {
+      try {
+        const res = await fetch('/api/notebooks');
+        const data = await res.json();
+
+        notebookSelect.innerHTML = '';
+
+        if (data.warning) {
+          notebookNotice.classList.add('visible');
+        }
+
+        if (!data.notebooks || data.notebooks.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '— No notebooks found —';
+          notebookSelect.appendChild(opt);
+          notebookSelect.disabled = true;
+          generateBtn.disabled = true;
+          return;
+        }
+
+        data.notebooks.forEach(nb => {
+          const opt = document.createElement('option');
+          opt.value = nb.id;
+          opt.textContent = nb.title;
+          notebookSelect.appendChild(opt);
+        });
+
+        notebookSelect.disabled = false;
+        generateBtn.disabled = false;
+      } catch (err) {
+        notebookSelect.innerHTML = '<option value="">Error loading notebooks</option>';
+        showError('Could not fetch notebooks: ' + err.message);
+      }
+    }
+
+    // ── Generate ──────────────────────────────────────────────────────────
+    generateBtn.addEventListener('click', async () => {
+      const notebookId = notebookSelect.value;
+      if (!notebookId) return;
+
+      const slides = parseInt(numSlides.value, 10) || 8;
+
+      // Reset UI
+      downloadsSection.style.display = 'none';
+      downloadList.innerHTML = '';
+      setStatus('running', 'Submitting request…');
+      generateBtn.disabled = true;
+      btnLabel.textContent = 'Generating…';
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notebook_id: notebookId, num_slides: slides }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          showError(data.error || 'Failed to start generation.');
+          return;
+        }
+
+        pollStatus(data.job_id);
+      } catch (err) {
+        showError('Network error: ' + err.message);
+      }
+    });
+
+    // ── Poll status ───────────────────────────────────────────────────────
+    function pollStatus(jobId) {
+      if (pollTimer) clearInterval(pollTimer);
+
+      // Animate progress bar to show activity
+      let pct = 5;
+      const progressSteps = [5, 15, 30, 50, 70, 85, 92, 96];
+      let stepIdx = 0;
+
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/status/' + jobId);
+          const job = await res.json();
+
+          setStatus(job.status, job.progress || '');
+
+          // Advance fake progress bar
+          if (job.status === 'running') {
+            if (stepIdx < progressSteps.length) {
+              progressBar.style.width = progressSteps[stepIdx++] + '%';
+            }
+          }
+
+          if (job.status === 'complete') {
+            clearInterval(pollTimer);
+            progressBar.style.width = '100%';
+            showDownloads(job.files, job.title);
+            generateBtn.disabled = false;
+            btnLabel.textContent = 'Generate Again';
+          } else if (job.status === 'error') {
+            clearInterval(pollTimer);
+            progressBar.style.width = '0%';
+            generateBtn.disabled = false;
+            btnLabel.textContent = 'Try Again';
+          }
+        } catch (err) {
+          clearInterval(pollTimer);
+          showError('Lost connection to server: ' + err.message);
+          generateBtn.disabled = false;
+          btnLabel.textContent = 'Try Again';
+        }
+      }, 3000);
+    }
+
+    // ── UI helpers ────────────────────────────────────────────────────────
+    function setStatus(status, message) {
+      statusSection.style.display = 'block';
+      statusSection.classList.remove('is-error', 'is-success');
+      statusText.textContent = message;
+
+      if (status === 'running' || status === 'queued') {
+        spinner.style.display = 'block';
+        statusIcon.style.display = 'none';
+        progressWrap.style.display = 'block';
+      } else if (status === 'complete') {
+        spinner.style.display = 'none';
+        statusIcon.textContent = '✅';
+        statusIcon.style.display = 'inline';
+        statusSection.classList.add('is-success');
+        progressWrap.style.display = 'none';
+      } else if (status === 'error') {
+        spinner.style.display = 'none';
+        statusIcon.textContent = '❌';
+        statusIcon.style.display = 'inline';
+        statusSection.classList.add('is-error');
+        progressWrap.style.display = 'none';
+      }
+    }
+
+    function showError(message) {
+      setStatus('error', message);
+      generateBtn.disabled = false;
+      btnLabel.textContent = 'Try Again';
+    }
+
+    function showDownloads(files, title) {
+      if (!files || files.length === 0) return;
+
+      downloadsSection.style.display = 'block';
+      downloadList.innerHTML = '';
+
+      if (title) {
+        const h = document.createElement('p');
+        h.style.cssText = 'font-size:.85rem;color:#555;margin-bottom:.75rem;';
+        h.textContent = '📑 ' + title;
+        downloadList.appendChild(h);
+      }
+
+      files.forEach(f => {
+        const btn = document.createElement('a');
+        btn.className = 'btn btn-download';
+        btn.href = '/download/' + encodeURIComponent(f.filename);
+        btn.download = f.filename;
+        btn.textContent = f.label || f.filename;
+        downloadList.appendChild(btn);
+      });
+    }
+
+    // ── Bootstrap ─────────────────────────────────────────────────────────
+    loadNotebooks();
+  </script>
+</body>
+</html>
